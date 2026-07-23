@@ -6,7 +6,7 @@
 
 A collection of self designed senior level Go challenges focused on network programming: raw sockets, protocol design, framing, reliability, and the failure modes that only show up once you stop using a library and start writing the transport layer yourself.
 
-These are a subset of a larger practice repo. I pulled the network specific ones out here because they tell a more focused story: building up from a basic TCP server to specific protocol level concerns like idempotent retransmission and RTP style timing, without concurrency exercises or data structure drills mixed in.
+These are a subset of a larger practice repo [Go Senior Challenges](https://github.com/viquitorreis/go-challenges). I pulled the network specific ones out here because they tell a more focused story: building up from a basic TCP server to specific protocol level concerns like idempotent retransmission and RTP style timing, without concurrency exercises or data structure drills mixed in.
 
 Each challenge folder has its own README with the problem context, what was actually built, and the design decisions behind it.
 
