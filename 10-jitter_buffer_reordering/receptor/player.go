@@ -1,0 +1,63 @@
+package main
+
+import (
+	"log"
+	"time"
+)
+
+type Player struct {
+	expectedSeq  uint64
+	lastPlayTime time.Time
+	stats        *PlayBackStats
+}
+
+type PlayBackStats struct {
+	TotalPlayed  uint64
+	TotalLost    uint64
+	TotalLatency uint64
+}
+
+func NewPlayer() *Player {
+	return &Player{
+		expectedSeq:  0,
+		lastPlayTime: time.Time{},
+		stats:        new(PlayBackStats),
+	}
+}
+
+func (p *Player) Bootstrap(jitterBuffer *JitterBuffer) {
+	for packet := range jitterBuffer.out {
+		now := time.Now()
+		interval := now.Sub(p.lastPlayTime)
+
+		if packet.SeqNumber > p.expectedSeq {
+			// lost packet
+			p.stats.TotalLost += (packet.SeqNumber - p.expectedSeq)
+		}
+
+		latency := now.Sub(time.UnixMilli(int64(packet.Timestamp)))
+
+		if !p.lastPlayTime.IsZero() {
+			log.Printf("playing seq=%d, latency=%v, interval since last=%v",
+				packet.SeqNumber, latency, interval)
+		}
+
+		p.stats.TotalPlayed++
+		p.stats.TotalLatency += uint64(latency.Milliseconds())
+		p.expectedSeq = packet.SeqNumber + 1
+		p.lastPlayTime = now
+	}
+}
+
+// metrics report
+func (p *Player) Report() {
+	avgLatency := float64(0)
+	if p.stats.TotalPlayed > 0 {
+		avgLatency = float64(p.stats.TotalLatency) / float64(p.stats.TotalPlayed)
+	}
+
+	log.Printf(
+		"--- session report ---\nplayed: %d\nlost: %d\navg latency: %.2fms",
+		p.stats.TotalPlayed, p.stats.TotalLost, avgLatency,
+	)
+}
