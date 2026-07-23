@@ -1,0 +1,5 @@
+<script>
+  const ws = new WebSocket("ws://localhost:6969/ws?room=support-123");
+  ws.onmessage = (e) => console.log("recebido:", e.data);
+  ws.onopen = () => console.log("conectado");
+</script>
