@@ -39,7 +39,7 @@ func newTestReceptor(t *testing.T) (r *Receptor, testSide net.Conn, cancel conte
 	serverSide, testSide := net.Pipe()
 	ctx, cancel := context.WithCancel(context.Background())
 
-	r = NewReceptor(ctx, serverSide)
+	r = NewReceptor(ctx, 4, serverSide)
 	r.maxWait = 30 * time.Millisecond
 
 	go r.handleRead()

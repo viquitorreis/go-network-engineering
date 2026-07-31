@@ -42,7 +42,7 @@ func main() {
 		log.Println("bye")
 	}()
 
-	receptor := NewReceptor(ctx, udpConn)
+	receptor := NewReceptor(ctx, 4, udpConn)
 
 	go receptor.handleRead()
 	go receptor.monitor()
@@ -57,6 +57,7 @@ type Receptor struct {
 	groupStates map[uint64]groupState
 	maxWait     time.Duration
 	stats       Stats
+	groupSize   uint8
 
 	mu sync.Mutex
 }
@@ -75,11 +76,12 @@ type Stats struct {
 	Lost      uint64
 }
 
-func NewReceptor(ctx context.Context, conn net.Conn) *Receptor {
+func NewReceptor(ctx context.Context, groupSize uint8, conn net.Conn) *Receptor {
 	return &Receptor{
 		ctx:         ctx,
 		Conn:        conn,
 		groupStates: make(map[uint64]groupState),
+		groupSize:   groupSize,
 		maxWait:     time.Millisecond * 200,
 	}
 }
@@ -164,8 +166,7 @@ func (r *Receptor) monitor() {
 					}
 				}
 
-				const groupSize = 4
-				missing := groupSize - dataReceived
+				missing := int(r.groupSize) - dataReceived
 
 				switch {
 				case missing == 0:
@@ -180,7 +181,7 @@ func (r *Receptor) monitor() {
 				default:
 					r.stats.Lost++
 
-					log.Printf("group %d: definite loss (%d of %d packages missing)", groupID, missing, groupSize)
+					log.Printf("group %d: definite loss (%d of %d packages missing)", groupID, missing, r.groupSize)
 				}
 
 				delete(r.groupStates, groupID)
@@ -189,5 +190,4 @@ func (r *Receptor) monitor() {
 			r.mu.Unlock()
 		}
 	}
-
 }

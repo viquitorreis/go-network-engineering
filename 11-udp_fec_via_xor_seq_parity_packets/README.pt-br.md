@@ -59,3 +59,49 @@ Comparar overhead de banda real (% de pacotes extra enviados) entre FEC e o cust
 se você entende o limite estrutural do XOR simples (recupera 1 perda por grupo, não mais) e desenha o tamanho de grupo como um trade-off explícito (banda vs robustez), não como número arbitrário.
 
 ---
+
+## Benchmarks
+
+Machine:
+
+```
+goos: linux
+goarch: amd64
+pkg: feq_parity_packets/receptor
+cpu: 12th Gen Intel(R) Core(TM) i5-1235U
+```
+
+| Group | Loss | Overhead | Definitive Loss | Recovered |
+|---|---|---|---|---|
+| 4 | 5% | 25.00% | 3.00% | 14.67% |
+| 4 | 10% | 25.00% | 6.67% | 30.33% |
+| 4 | 20% | 25.00% | 21.33% | 40.33% |
+| 8 | 5% | 12.50% | 9.33% | 28.67% |
+| 8 | 10% | 12.50% | 27.00% | 31.67% |
+| 8 | 20% | 12.50% | 57.00% | 28.67% |
+| 16 | 5% | 6.25% | 26.33% | 33.67% |
+| 16 | 10% | 6.25% | 57.67% | 26.00% |
+| 16 | 20% | 6.25% | 90.00% | 7.33% |
+
+### A intuição do porquê "recovered %" tem um pico
+
+`Recovered` só acontece no caso muito específico de **exatamente um sumir**. Com um grupo pequeno (poucos pacotes enviados), a chance de exatamente 1 sumir é baixa simplesmente porque tem poucos membros envolvidos, mas conforme o grupo cresce, tem mais **chances** de exatamente uma pessoa sumir (mais "tentativas"), então a taxa de recuperação sobe. Só que ao mesmo tempo, o grupo maior também aumenta a chance de **duas ou mais** sumirem, esse efeito cresce mais rápido. Em algum ponto, a chance de 2+ ultrapassa a chance de "exatamente 1", e a partir dai crescer o grupo só piora as coisas: mais perda definitiva, menos recuperação.
+
+Podemos ver isso nos números: 20% de perda, `recovered` sobe de 40,33% (grupo 4) para 28,67% (grupo 8) e desaba para 7,33% (grupo 16), o pico já passou entre 4 e 8, e depois disso só piora.
+
+### Não existe apenas uma direção para trade-off
+
+O trade-off, depende de vários fatores, como a taxa de perda esperada da rede.
+
+- **Rede boa (5% de perda):** grupo 16 já perde 26,33% definitivamente, isso é surpreendentemente ruim mesmo numa rede "boa", pois o denominador (16 pacotes) é grande demais. o grupo 4 continua com só 3% de perda definitiva, e paga mais overhead (25%) que o grupo 16 (6,25%). Então mesmo em rede boa, o grupo 4 é estritamente mais seguro, mas é mais caro em banda (esperado pelo approach feito).
+
+- **Rede ruim (20% de perda):** a diferença fica gritante, o grupo 4 perde 21,33% definitivamente, o grupo 16 perde 90%. Nessa condição grupo grande é quase inútil.
+
+### Conclusão
+
+Grupo pequeno é sempre mais robusto. Grupo grande é sempre mais econômico em banda. Não tem um grupo que vai vencer nos dois lados no approach escolhido ao mesmo tempo. A escolha certa depende de qual recurso é mais escasso no cenário real (banda ou tolerância a perda), e esse benchmark é a ferramenta para decidir isso.
+
+### Possíveis Melhorias
+
+- **Reed-Solomon em vez de XOR com paridade única.** XOR é, na prática, o caso especial de Reed-Solomon com só 1 pacote de paridade, e é por isso que ele só recupera exatamente 1 perda por grupo. Usar `k` pacotes de dados + `m` pacotes de paridade (Reed-Solomon) toleraria até `m` perdas por grupo, ao custo de aritmética de Galois Field, que é bem mais cara que um XOR simples.
+- **Interleaving.** Esse benchmark assume perda de pacote independente e aleatória. Perda de rede real costuma vir em rajada (um roteador congestionado derruba vários pacotes consecutivos de uma vez). Se um grupo FEC é formado por pacotes consecutivos, uma única rajada pode derrubar mais de um pacote do mesmo grupo. Interleaving espalha pacotes consecutivos entre grupos diferentes, então uma rajada atinge vários grupos levemente em vez de um grupo só pesadamente.

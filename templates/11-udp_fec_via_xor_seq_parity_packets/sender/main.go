@@ -16,7 +16,6 @@ import (
 
 // groupSize fixed for simplicity
 // otherwise would be needed to send the amount of packets it group have
-var groupSize = 4
 
 func main() {
 	addr, err := net.ResolveUDPAddr("udp4", "localhost:8080")
@@ -44,7 +43,7 @@ func main() {
 	}()
 
 	// 20 ms interval sender
-	sender := NewSender(ctx, udpConn, 20)
+	sender := NewSender(ctx, udpConn, 4, 20)
 	go sender.Send()
 
 	<-ctx.Done()
@@ -55,14 +54,16 @@ type Sender struct {
 	Conn       net.Conn
 	groupID    uint64
 	nextSeqNum uint64
+	groupSize  uint8
 	Interval   time.Duration
 }
 
-func NewSender(ctx context.Context, conn net.Conn, interval int) *Sender {
+func NewSender(ctx context.Context, conn net.Conn, groupSize uint8, interval int) *Sender {
 	return &Sender{
-		ctx:      ctx,
-		Conn:     conn,
-		Interval: time.Millisecond * time.Duration(interval),
+		ctx:       ctx,
+		Conn:      conn,
+		groupSize: groupSize,
+		Interval:  time.Millisecond * time.Duration(interval),
 	}
 }
 

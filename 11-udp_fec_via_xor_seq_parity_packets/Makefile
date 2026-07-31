@@ -7,6 +7,9 @@ test:
 	@go test -v ./receptor/...
 	@go test -v ./sender/...
 
+bench:
+	@go test -bench=BenchmarkFEC -benchtime=300x ./...
+
 build-receptor:
 	@mkdir -p ${RECEPTOR_BIN} 
 	@go build -o ${RECEPTOR_BIN}/receptor ./receptor/.
