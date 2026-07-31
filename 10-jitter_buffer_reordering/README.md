@@ -1,8 +1,8 @@
 # JITTER BUFFER: REORDERING
 
 **Category**: Streaming / Network programming, raw
-**Time**: 2h (15min theory + ~3h45 challenge)
-**Builds on**: challenge 26 (RTP-style packetizer with seq + timestamp)
+**Time**: 4h (15min theory + ~3h45 challenge)
+**Builds on**: challenge 09 (RTP-style packetizer with seq + timestamp)
 
 ## Study before starting (15 min)
 

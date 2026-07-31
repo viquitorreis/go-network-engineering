@@ -2,7 +2,7 @@
 
 **Categoria**: Streaming / Network programming raw
 **Tempo**: 2h (15min teoria + ~1h45 challenge)
-**Builda em cima de**: challenge 26 (RTP-style packetizer com seq + timestamp)
+**Builda em cima de**: challenge 09 (RTP-style packetizer com seq + timestamp)
 
 ## Estudo (15 min):
 
