@@ -1,0 +1,4 @@
+vmlinux.h
+*.o
+counter
+headers/
