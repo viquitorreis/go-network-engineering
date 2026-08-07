@@ -1,107 +1,72 @@
 # AF_XDP SOCKET: FIRST ATTACH
 
-**Categoria**: Networking / Kernel Bypass
-**Tempo**: 3h
-**Builda em cima de**: 13-xdp_filters_drop_by_criteria (mesmo XDP program hook, agora redirecionando pra um socket em vez de contar/dropar)
+**Category**: Networking / Kernel Bypass
+**Time**: 3h
+**Builds on**: 13-xdp_filters_drop_by_criteria (same XDP program hook, now redirecting to a socket instead of counting/dropping)
 
-## Estudo antes (10-15min)
+## Study before (10-15min)
 
-A diferença entre XDP puro (roda dentro do kernel, decide DROP/PASS/etc **antes do pacote entrar na stack de rede**)
-e AF_XDP (socket especial que recebe pacotes crus direto do driver da NIC, via um
-buffer compartilhado entre kernel e userspace chamado **UMEM**, sem passar pela
-stack de rede tradicional). AF_XDP ainda precisa de um XDP program anexado
-pra decidir *quais* pacotes redirecionar pro socket (via XDP_REDIRECT), os
-dois trabalham juntos, XDP program decide, AF_XDP entrega. Hoje estamos apenas montando
-o socket básico e o attach, sem redirect ainda (isso é o próximo
-challenge).
+The difference between plain XDP (runs inside the kernel, decides DROP/PASS/etc **before the packet enters the network stack**) and AF_XDP (a special socket that receives raw packets straight from the NIC driver, via a kernel/userspace shared buffer called **UMEM**, bypassing the traditional network stack). AF_XDP still needs an attached XDP program to decide *which* packets get redirected to the socket (via XDP_REDIRECT) the two work together, the XDP program decides, AF_XDP delivers. Today we're only setting up the basic socket and the attach, no redirect yet (that's the next challenge).
 
-## Contexto
+## Context
 
-Os challenges 12 e 13 processaram pacote inteiramente dentro do
-kernel (contar, dropar). Isso é rápido mas limitado, você não consegue
-inspecionar payload complexo nem processar em userspace sem custo de cópia
-pela stack normal. AF_XDP existe pra isso: throughput de kernel bypass, mas
-com a flexibilidade de processar em Go no userspace.
+This software is a Go program that **intercepts network packets before they pass through the operating system's normal stack**, using two mechanisms:
+- A small piece of software that runs inside the kernel (XDP program, compiled from C). It looks at every packet arriving on a specific network interface and decides "does this have an AF_XDP socket waiting for it? If so, send it straight there, skipping the traditional transport layer (TCP/IP, regular sockets, etc.)"
+- A special socket created in the Go program (userspace) that receives these redirected packets through a memory region shared with the kernel (the UMEM), with no extra data copy between kernel and application that copy is normally what makes high-volume packet processing slow.
 
-## O que construir
+Resulting data path: network driver -> Kernel -> XDP Program -> AF_XDP socket -> Go code
 
-1. UMEM: região de memória compartilhada registrada com o kernel, dividida
-   em frames de tamanho fixo, mais os 4 rings de controle (fill, completion,
-   rx, tx)
-2. Socket AF_XDP criado e vinculado (bind) a uma interface de rede + fila
-   (queue id) específica
-3. Attach do socket ao UMEM via **setsockopt**
-4. Loop básico: popula o fill ring com frames disponíveis, faz poll no
-   socket, lê o rx ring quando pacote chega, imprime tamanho e primeiros
-   bytes do pacote recebido
+Challenges 12 and 13 processed packets entirely inside the kernel (counting, dropping). That's fast but limited you can't inspect complex payloads or process in userspace without paying the copy cost through the normal stack. AF_XDP exists for that: kernel-bypass throughput, with the flexibility of processing in Go in userspace.
 
-O ring responsável por dizer ao kernel "aqui está um frame livre pra você preencher" é o **fill ring**. Você "enche" o ring buffer com endereços de buffer vazios, o kernel consome desse ring, escreve o pacote recebido lá dentro, e devolve a posição preenchida via **rx ring** (esse sim é o que lemos para pegar o pacote). O completion e o rx ring são par simétrico do lado de *enviar* (sem uso agora, foco é só receber)
+## What to build
 
-**Duas diferenças dos outros challenges 12/13**:
+1. UMEM: shared memory region registered with the kernel, divided into fixed-size frames, plus the 4 control rings (fill, completion, rx, tx)
+2. AF_XDP socket created and bound to a specific network interface + queue id
+3. Socket attached to the UMEM via **setsockopt**
+4. Basic loop: populate the fill ring with available frames, poll the socket, read the rx ring when a packet arrives, print size and first bytes of the received packet
 
-- Sem parsing de Ethernet/IP/UDP aqui. No challenge 12 que precisamos inspecionar o pacote pra decidir contar por porta. Aqui não, a decisão é só "esse queue id tem socket registrado?", então não precisa nem tocar em ctx->data/data_end. Isso também significa: redireciona todo tipo de pacote que chegar nessa queue, não só UDP.
-- Sem qidconf_map separado (que o asavie/xdp usa no repo dele), um único xsks_map já resolve, porque a própria presença de uma entrada na queue já significa "tem socket aqui, redireciona".
+The ring responsible for telling the kernel "here's a free frame for you to fill" is the **fill ring**. You "fill" the ring buffer with empty buffer addresses, the kernel consumes from that ring, writes the received packet into it, and hands the filled slot back via the **rx ring** (that's what we actually read to get the packet). The completion and tx rings are the symmetric pair on the *sending* side (unused today, focus is receive-only).
 
-## Requisitos obrigatórios
+**Two differences from challenges 12/13**:
 
-- Foco só no attach e no primeiro pacote chegando pelo socket sem
-  redirect via XDP program ainda (pode testar com tráfego que já bateria
-  no host de qualquer forma, tipo loopback com veth pair, se não tiver
-  interface física disponível pra testar com segurança)
-- Documentar os 4 rings (fill, completion, rx, tx) e o papel de cada um
-  isso é a base conceitual pro challenge de zero-copy que vem depois
-- Vai precisar rodar como root ou com capability CAP_NET_RAW/CAP_BPF
-  documenta isso no README, já que é diferente dos challenges anteriores
+- No Ethernet/IP/UDP parsing here. Challenge 12 needed to inspect the packet to decide how to count it by port. Here the decision is just "does this queue id have a socket registered?", so it doesn't even touch `ctx->data`/`data_end`. This also means: every packet type landing on this queue gets redirected, not just UDP.
+- No separate `qidconf_map` (which `asavie/xdp` uses in its own repo) a single `xsks_map` is enough, since an entry existing for that queue already means "there's a socket here, redirect".
 
-**Bonus (se sobrar tempo)**
+## Required
 
-- Medir e documentar quantos pacotes por segundo
-- Você consegue ler do rx ring num teste local simples, como baseline pra
-comparar com o benchmark de zero-copy do challenge 
+- Focus only on the attach and the first packet arriving through the socket, no XDP-program-driven redirect logic yet (test with traffic that would already hit the host anyway, e.g. loopback via a veth pair, if no physical interface is safely available to test with)
+- Document the 4 rings (fill, completion, rx, tx) and each one's role this is the conceptual base for the zero-copy challenge that comes later
+- Will need to run as root or with CAP_NET_RAW/CAP_BPF capability document this in the README, since it differs from previous challenges
 
-O que será observado: se os 4 rings foram entendidos na função de cada um
-(não só copiados de um exemplo), e se o socket realmente recebe pacote
-crus, não simulados
+**Bonus (if time allows)**
 
-**Observações importantes**
+- Measure and document how many packets per second you can read from the rx ring in a simple local test, as a baseline to compare against the zero-copy benchmark in a later challenge
 
-- O **XDP program** (o que roda dentro do kernel, decidindo redirect) precisa ser escrito em C/C++ (ou rust etc) e compilado para bytecode eBPF via `clang/LLVM`. Não dá para escrever isso em Go puro pois a linguagem precisa de um OS para rodar.
-- O **socket AF_XDP** em si (userspace, lendo do rx ring) é Go puro, usando uma lib como `github.com/cilium/ebpf` ou `github.com/asavie/xdp`, isso não precisa de C.
-- Ou seja, precisa de pouco C pro programa XDP que faz o redirect, mas a maior parte do trabalho (setup do socket, UMEM, rings, processamento de pacote) é Go, essa parte de C foi feito nos challenges 12/13.
+What will be observed: whether the 4 rings were understood in terms of what each one does (not just copied from an example), and whether the socket actually receives raw packets, not simulated ones
 
-## Referencias
+**Important notes**
 
-- Lib Go pura que usa um socket AF_XDP, UMEM e os 4 rings. Tem examples/ com sendudp.go e senddnsqueries.go prontos para rodar e modificar
+- The **XDP program** (runs inside the kernel, decides the redirect) needs to be written in C/C++ (or Rust, etc.) and compiled to eBPF bytecode via `clang`/LLVM. This can't be written in pure Go, since the language needs an OS to run on.
+- The **AF_XDP socket** itself (userspace, reading from the rx ring) is pure Go, using a lib like `github.com/cilium/ebpf` or `github.com/asavie/xdp` no C needed for that part.
+- In other words: a small amount of C is needed for the XDP program that does the redirect, but most of the work (socket setup, UMEM, rings, packet processing) is Go the C part follows the same pattern already used in challenges 12/13.
 
-https://github.com/asavie/xdp
+## References
 
-- Explica os 4 rings, copy mode vs zero copy, e por que precisa de um programa XDP mínimo para o redirect:
+- Pure Go lib wrapping an AF_XDP socket, UMEM, and the 4 rings. Has `examples/` with `sendudp.go` and `senddnsqueries.go` ready to run and modify:
+  https://github.com/asavie/xdp
 
-https://github.com/xdp-project/xdp-tutorial/blob/main/advanced03-AF_XDP/README.org
+- Explains the 4 rings, copy mode vs zero-copy, and why a minimal XDP program is needed for the redirect:
+  https://github.com/xdp-project/xdp-tutorial/blob/main/advanced03-AF_XDP/README.org
 
-- Exemplo XDP + Go + bpf2go (sem C manual). Tem um .c que pode ser compilado com `go generate`, resto é go
+- XDP + Go + bpf2go example (no manual C wrangling beyond the `.c` file itself, compiled via `go generate`, everything else is Go):
+  https://github.com/cilium/ebpf/blob/main/examples/xdp/main.go
 
-https://github.com/cilium/ebpf/blob/main/examples/xdp/main.go
+- Official kernel doc on AF_XDP, covering the 4 rings (fill, completion, rx, tx) and the `XSKMAP + XDP_REDIRECT` flow:
+  https://docs.kernel.org/networking/af_xdp.html
 
-- Doc oficial do kernel sobre AF_XDP com referência sobre os 4 rings (fill, completion, rx, tx) e o fluxo `KSKMAP + XDP_REDIRECT`
+## What was actually built
 
-## O que fazer
-
-1. Clona github.com/asavie/xdp, roda o example examples/sendudp (ou lê e
-   entende o de recebimento, se tiver foco em receber pacote, não mandar)
-2. Modifica pra rodar no seu ambiente: interface de loopback ou veth pair
-   local, já que não precisa de tráfego real de produção pra esse
-   challenge
-3. Depois de rodar, escreve um resumo curto (README ou comentário) dos 4
-   rings E de qual chamada da lib corresponde a qual ring (ex:
-   "xsk.Fill(...) enche o fill ring, xsk.Receive(...) lê do rx ring")
-4. Ajusta o exemplo pra imprimir tamanho + primeiros bytes de cada pacote
-   recebido, em vez do que o exemplo original faz
+Rather than the fixed program from `asavie/xdp`, the XDP program here was written in C and compiled via `bpf2go` (same pattern as challenges 12/13), giving full control over the redirect logic instead of relying on a hardcoded bytecode program. The AF_XDP socket (UMEM registration, ring setup, fill/receive loop) was hand-written in Go using raw syscalls (`setsockopt`/`getsockopt`/`mmap`/`bind`) against `golang.org/x/sys/unix` types, rather than depending on a third-party socket wrapper closer to how this would be done in a production system that needs custom packet filtering logic.
 
 ---
-
-Primeiro passo: antes de qualquer socket, qual dos 4 rings (fill,
-completion, rx, tx) é responsável por dizer ao kernel "aqui está um frame
-de buffer livre pra você preencher com o próximo pacote que chegar"? Pensa
-nisso primeiro é a peça que normalmente confunde na primeira vez com
-AF_XDP.
+First step: before any socket code, which of the 4 rings (fill, completion, rx, tx) is responsible for telling the kernel "here's a free buffer frame for you to fill with the next incoming packet"? Think about this first it's the piece that usually causes confusion the first time working with AF_XDP.
