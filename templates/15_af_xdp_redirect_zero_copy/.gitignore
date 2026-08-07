@@ -1,0 +1,5 @@
+bin/
+vmlinux.h
+*.o
+counter
+headers/
