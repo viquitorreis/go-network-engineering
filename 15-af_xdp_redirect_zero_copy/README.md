@@ -13,6 +13,22 @@ driver). Without either flag, the kernel picks automatically, but in
 production you want to know explicitly which mode is active, not find
 out by accident.
 
+## Understanding the data path
+
+How and why is zero-copy so fast?
+
+![Data Path](./zero_copy_data_path.png)
+
+The answer is about who programs the network card's DMA descriptors.
+
+In copy mode, the **NIC's DMA descriptors** point to the driver's internal buffer, that's where the hardware *writes the packet as soon as it arrives*, because that's the only address the driver knows and controls in this mode. After that, someone (the kernel) has to manually copy those bytes from the driver's buffer into your **UMEM**, because they're two physically different memory regions.
+
+In zero-copy, the kernel does something deeper: it reprograms the **NIC's own DMA descriptors to point directly at your UMEM's frame addresses**. This is only possible because, on bind with `XDP_ZEROCOPY`, the NIC driver has a specific API (`ndo_bpf` with `XDP_SETUP_XSK_POOL`, which we mentioned earlier) that lets the kernel tell the hardware: "next time a packet arrives on this queue, write it here", passing the physical address of a frame in your **UMEM**, not the driver's internal buffer.
+
+In other words: the NIC, physically, via DMA, writes the packet bytes directly into memory your Go process already sees, the hardware never touches the driver's intermediate buffer because, in this mode, that intermediate buffer simply stops being used. It's not "copying faster", it's eliminating the copy because the final destination and the DMA target are the same memory region from the start.
+
+That's why only specific drivers support this: it requires the NIC driver to know how to do this descriptor reprogramming pointing at user memory (it's not something the generic kernel resolves on its own).
+
 **Context**:
 
 Challenge 14 bound the socket without specifying a mode, so the kernel
